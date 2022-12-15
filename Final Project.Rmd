@@ -1,0 +1,167 @@
+---
+title: "STAT 630 Project"
+author: "Nikhil Tarigonda"
+date: "2022-12-05"
+output: pdf_document
+---
+
+Loading all the required libraries,
+
+```{r, message=FALSE}
+library(lubridate)
+library(tidyverse)
+library(readxl)
+library(corrplot)
+library(caTools)
+library(caret)
+library(wordcloud)
+library(performance)
+```
+
+Loading the dataset and checking the dimensions,
+
+```{r}
+airline <- read_excel(here::here("data/Data_Train.xlsx"))
+#dim(airline)
+#head(airline)
+#str(airline)
+```
+Data Cleaning:
+
+adding duration_minutes variable from Duration variable,
+
+```{r}
+airline <- airline %>% 
+  mutate(hour_min =parse_number(str_extract(airline$Duration, "[0-9]+h"))*60) %>% 
+  mutate(minutes = parse_number(str_extract(airline$Duration, "[0-9]+m"))) %>% 
+  mutate(minutes = replace(minutes,is.na(minutes),0)) %>% 
+  mutate(duration_minutes = hour_min + minutes)
+```
+
+check if there are any na's, there are two observations which will be removed
+uncomment and the observations can be removed
+
+```{r}
+which(is.na(airline$Total_Stops))
+#any(is.na(airline$hour_min))
+#airline <- airline[-6475,]
+#airline <- airline[-9039,]
+```
+Histogram to check the distribution of our response(Price),
+
+```{r}
+airline %>% 
+  ggplot(aes(x = Price)) + 
+  geom_histogram(fill = "blue", bins= 10,col=I("black"), binwidth = 5000) + 
+  theme_classic() + 
+  ggtitle("Distribution of Price")
+```
+
+Using log transformation since the data is skewed,
+
+```{r}
+airline %>% 
+  ggplot(aes(x = log(Price))) +
+  geom_histogram(fill = "blue", bins = 10,col=I("black")) +
+  theme_classic() + 
+  ggtitle("Log transformed distribution of Price")
+```
+
+simple linear model,
+
+```{r}
+#model_slr <- lm(Price ~ duration_minutes, data = airline)
+model_slr <- lm(log(Price) ~ duration_minutes, data = airline)
+summary(model_slr)
+```
+
+Scatter plot of Price vs duration_minutes,
+
+```{r}
+airline %>% 
+  ggplot(aes(x = duration_minutes, y = log(Price))) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  xlab("Duration (minutes)") +
+  ylab("log(Price)") +
+  ggtitle("Price vs Duration") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30))
+```
+
+Assumptions,
+
+```{r}
+check_model(model_slr, check = c("qq","linearity","homogeneity"))
+```
+
+Adding stops as a factor,
+
+```{r}
+unique(airline$stops)
+airline <- airline %>% 
+  mutate(stops = case_when(
+    Total_Stops == "non-stop" ~ 0,
+    Total_Stops == "1 stop" ~ 1,
+    Total_Stops == "2 stops" ~ 2,
+    Total_Stops == "3 stops" ~ 3,
+    Total_Stops == "4 stops" ~ 4))
+```
+
+
+multiple linear model,
+
+```{r}
+model_mlr <- lm(log(Price) ~ duration_minutes +factor(stops), data = airline)
+summary(model_mlr)
+```
+
+Confidence Intervals,
+
+```{r}
+confint(model_slr)
+confint(model_mlr)
+```
+
+Correlation,
+
+```{r}
+numeric_airline <- sapply(airline, is.numeric)
+cor.data <- cor(airline[, numeric_airline])
+corrplot.mixed(cor.data[c(1,4,5),c(1,4,5)], order = 'AOE', upper = "pie")
+```
+
+Cross validation,
+
+```{r}
+set.seed(102)
+sample_airline <- sample.split(airline$Price, SplitRatio = 0.7)
+# train data
+train <- subset(airline, sample_airline == TRUE)
+# test data
+test <- subset(airline, sample_airline == FALSE)
+```
+
+Prediction,
+
+```{r}
+model_slr <- lm(log(Price) ~ duration_minutes, data = train)
+model_mlr <- lm(log(Price) ~ duration_minutes +factor(stops), data = train)
+
+price.prediction.slr <- predict(model_slr, test)
+price.prediction.mlr <- predict(model_mlr, test)
+
+```
+
+Results,
+
+```{r}
+results <- cbind(test$Price, exp(price.prediction.slr), exp(price.prediction.mlr))
+colnames(results) <- c('actual','slr_predicted','mlr_predicted')
+results <- as.data.frame(results)
+head(results,10)
+
+set.seed(123)
+results %>% sample_n(10)
+```
+
